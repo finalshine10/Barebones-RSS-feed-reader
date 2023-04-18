@@ -1,0 +1,59 @@
+import sys, os, json, feedparser
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextBrowser, QListWidget, QListWidgetItem
+from PyQt5.QtCore import QUrl
+from PyQt5.QtGui import QDesktopServices
+
+class RSSReaderApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout, feed_panel_layout = QHBoxLayout(), QVBoxLayout()
+        self.feeds_list, self.url_input, self.add_button, self.fetch_button, self.feed_content = QListWidget(self), QLineEdit(self), QPushButton('Add Feed', self), QPushButton('Fetch Feed', self), QTextBrowser(self)
+        self.feeds_list.itemClicked.connect(self.feed_list_item_clicked)
+        layout.addWidget(self.feeds_list)
+        [feed_panel_layout.addWidget(w) for w in [QLabel('RSS Feed URL:', self), self.url_input, self.add_button, self.fetch_button, self.feed_content]]
+        self.add_button.clicked.connect(self.add_feed)
+        self.fetch_button.clicked.connect(self.fetch_feed)
+        self.feed_content.setReadOnly(True)
+        self.feed_content.setOpenLinks(False)
+        self.feed_content.anchorClicked.connect(self.link_clicked)
+        layout.addLayout(feed_panel_layout)
+        self.setLayout(layout)
+        self.setWindowTitle('RSS Reader')
+        self.setGeometry(300, 300, 800, 400)
+        self.saved_feeds_file = 'saved_feeds.json'
+        self.load_saved_feeds()
+
+    def add_feed(self):
+        url = self.url_input.text()
+        if url: self.feeds_list.addItem(QListWidgetItem(url, self.feeds_list)), self.url_input.clear(), self.save_feeds()
+
+    def feed_list_item_clicked(self, item): self.url_input.setText(item.text()), self.fetch_feed()
+
+    def fetch_feed(self):
+        url, content = self.url_input.text(), ''
+        if url:
+            try:
+                feed = feedparser.parse(url)
+                if feed and 'entries' in feed:
+                    for entry in feed['entries']: content += f"<h3><a href='{entry.get('link', 'No link')}'>{entry.get('title', 'No title')}</a></h3>Published: {entry.get('published', 'No date')}<br><hr>"
+                    self.feed_content.setHtml(content)
+                else: self.feed_content.setPlainText('Error fetching feed.')
+            except Exception as e: self.feed_content.setPlainText(f'Error fetching feed: {str(e)}')
+        else: self.feed_content.setPlainText('Please enter a valid RSS feed URL.')
+
+    def link_clicked(self, url): QDesktopServices.openUrl(url)
+
+    def load_saved_feeds(self):
+        if os.path.exists(self.saved_feeds_file):
+            with open(self.saved_feeds_file, 'r') as f:
+                for feed in json.load(f): self.feeds_list.addItem(QListWidgetItem(feed, self.feeds_list))
+
+    def save_feeds(self):
+        feeds = [self.feeds_list.item(index).text() for index in range(self.feeds_list.count())]
+        with open(self.saved_feeds_file, 'w') as f: json.dump(feeds, f)
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    rss_reader = RSSReaderApp()
+    rss_reader.show()
+    sys.exit(app.exec_())
