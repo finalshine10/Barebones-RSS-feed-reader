@@ -1,5 +1,5 @@
 # Python-based-RSS-Feed-reader
-A simple RSS Feed reader built using Python.
+A simple RSS Feed reader for desktop built using Python. Tested on Windows 11.
 
 Features:
 - Save multiple RSS feeds.
