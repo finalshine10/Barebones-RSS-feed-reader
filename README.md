@@ -1,4 +1,4 @@
-# A simple, barebones RSS feed reader
+# A barebones RSS feed reader
 A simple RSS feed reader for desktop built using Python. Tested on Windows 11.
 
 Features:
