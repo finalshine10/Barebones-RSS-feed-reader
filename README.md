@@ -11,4 +11,4 @@ How to run:
 
 OR
 
-- Compile the script (preferably via Pyinstaller).
+- Compile the source code (preferably via Pyinstaller).
