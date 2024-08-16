@@ -1,59 +1,138 @@
-import sys, os, json, feedparser
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextBrowser, QListWidget, QListWidgetItem
-from PyQt5.QtCore import QUrl
-from PyQt5.QtGui import QDesktopServices
+import tkinter as tk
+from tkinter import ttk, messagebox
+import feedparser
+import json
+import webbrowser
 
-class RSSReaderApp(QWidget):
-    def __init__(self):
-        super().__init__()
-        layout, feed_panel_layout = QHBoxLayout(), QVBoxLayout()
-        self.feeds_list, self.url_input, self.add_button, self.fetch_button, self.feed_content = QListWidget(self), QLineEdit(self), QPushButton('Add Feed', self), QPushButton('Fetch Feed', self), QTextBrowser(self)
-        self.feeds_list.itemClicked.connect(self.feed_list_item_clicked)
-        layout.addWidget(self.feeds_list)
-        [feed_panel_layout.addWidget(w) for w in [QLabel('RSS Feed URL:', self), self.url_input, self.add_button, self.fetch_button, self.feed_content]]
-        self.add_button.clicked.connect(self.add_feed)
-        self.fetch_button.clicked.connect(self.fetch_feed)
-        self.feed_content.setReadOnly(True)
-        self.feed_content.setOpenLinks(False)
-        self.feed_content.anchorClicked.connect(self.link_clicked)
-        layout.addLayout(feed_panel_layout)
-        self.setLayout(layout)
-        self.setWindowTitle('RSS Reader')
-        self.setGeometry(300, 300, 800, 400)
-        self.saved_feeds_file = 'saved_feeds.json'
-        self.load_saved_feeds()
+# Function to load saved RSS feeds from a file
+def load_feeds():
+    try:
+        with open("feeds.json", "r") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return {}
 
-    def add_feed(self):
-        url = self.url_input.text()
-        if url: self.feeds_list.addItem(QListWidgetItem(url, self.feeds_list)), self.url_input.clear(), self.save_feeds()
+# Function to save RSS feeds to a file
+def save_feeds(feeds):
+    with open("feeds.json", "w") as file:
+        json.dump(feeds, file, indent=4)
 
-    def feed_list_item_clicked(self, item): self.url_input.setText(item.text()), self.fetch_feed()
+# Function to fetch and display feed entries
+def fetch_feed():
+    url = feed_url_entry.get()
+    if not url:
+        messagebox.showwarning("Input Error", "Please enter a valid RSS feed URL.")
+        return
 
-    def fetch_feed(self):
-        url, content = self.url_input.text(), ''
-        if url:
-            try:
-                feed = feedparser.parse(url)
-                if feed and 'entries' in feed:
-                    for entry in feed['entries']: content += f"<h3><a href='{entry.get('link', 'No link')}'>{entry.get('title', 'No title')}</a></h3>Published: {entry.get('published', 'No date')}<br><hr>"
-                    self.feed_content.setHtml(content)
-                else: self.feed_content.setPlainText('Error fetching feed.')
-            except Exception as e: self.feed_content.setPlainText(f'Error fetching feed: {str(e)}')
-        else: self.feed_content.setPlainText('Please enter a valid RSS feed URL.')
+    feed = feedparser.parse(url)
+    if feed.bozo:
+        messagebox.showerror("Fetch Error", "Failed to fetch RSS feed. Please check the URL.")
+        return
 
-    def link_clicked(self, url): QDesktopServices.openUrl(url)
+    feed_name = feed.feed.title if feed.feed.title else "Unnamed Feed"
+    feeds[feed_name] = url
+    save_feeds(feeds)
 
-    def load_saved_feeds(self):
-        if os.path.exists(self.saved_feeds_file):
-            with open(self.saved_feeds_file, 'r') as f:
-                for feed in json.load(f): self.feeds_list.addItem(QListWidgetItem(feed, self.feeds_list))
+    feed_selector['values'] = list(feeds.keys())  # Update dropdown menu
+    feed_selector.set(feed_name)
+    display_feed(feed_name, feed.entries)
 
-    def save_feeds(self):
-        feeds = [self.feeds_list.item(index).text() for index in range(self.feeds_list.count())]
-        with open(self.saved_feeds_file, 'w') as f: json.dump(feeds, f)
+# Function to display feed entries in the UI
+def display_feed(feed_name, entries):
+    feed_list.delete(0, tk.END)
+    feed_title.set(feed_name)
+    for entry in entries:
+        feed_list.insert(tk.END, entry.title)
+        feed_links[entry.title] = entry.link
 
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    rss_reader = RSSReaderApp()
-    rss_reader.show()
-    sys.exit(app.exec_())
+# Function to handle feed selection from saved feeds
+def on_feed_select(event):
+    selected_feed = feed_selector.get()
+    if selected_feed:
+        feed = feedparser.parse(feeds[selected_feed])
+        display_feed(selected_feed, feed.entries)
+
+# Function to open the selected feed item in the default web browser
+def open_selected_entry(event):
+    selected_index = feed_list.curselection()
+    if selected_index:
+        selected_title = feed_list.get(selected_index)
+        selected_link = feed_links.get(selected_title)
+        if selected_link:
+            webbrowser.open(selected_link)
+
+# Debounced function to handle resizing
+def debounce_resize(event):
+    app.after(100, resize_widgets)  # Delay by 100ms
+
+# Function to resize widgets responsively
+def resize_widgets():
+    window_width = app.winfo_width()
+    font_size = max(8, int(window_width / 80))
+    
+    feed_url_label.config(font=("Arial", font_size))
+    feed_url_entry.config(font=("Arial", font_size))
+    fetch_button.config(font=("Arial", font_size))
+    feed_selector.config(font=("Arial", font_size))
+    feed_title_label.config(font=("Arial", font_size + 2, "bold"))
+    feed_list.config(font=("Arial", font_size))
+
+# Main application window
+app = tk.Tk()
+app.title("RSS Feed Reader")
+app.geometry("800x600")
+
+# Configure the main grid layout
+app.grid_rowconfigure(1, weight=1)
+app.grid_columnconfigure(0, weight=1)
+
+# Top Frame for Feed URL entry
+top_frame = ttk.Frame(app)
+top_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
+
+feed_url_label = ttk.Label(top_frame, text="RSS Feed URL:")
+feed_url_label.grid(row=0, column=0, padx=5, sticky="w")
+
+feed_url_entry = ttk.Entry(top_frame)
+feed_url_entry.grid(row=0, column=1, padx=5, sticky="ew")
+
+fetch_button = ttk.Button(top_frame, text="Fetch Feed", command=fetch_feed)
+fetch_button.grid(row=0, column=2, padx=5)
+
+top_frame.grid_columnconfigure(1, weight=1)
+
+# Middle Frame for Feed Selector and Display
+middle_frame = ttk.Frame(app)
+middle_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
+
+# Configure middle frame grid to take at least 60% of the height
+middle_frame.grid_rowconfigure(0, weight=1)
+middle_frame.grid_rowconfigure(1, weight=1)
+middle_frame.grid_rowconfigure(2, weight=5)  # Increase weight for feed list
+middle_frame.grid_columnconfigure(0, weight=1)
+
+feed_selector = ttk.Combobox(middle_frame, state="readonly")
+feed_selector.grid(row=0, column=0, sticky="ew")
+feed_selector.bind("<<ComboboxSelected>>", on_feed_select)
+
+feed_title = tk.StringVar()
+feed_title_label = ttk.Label(middle_frame, textvariable=feed_title, font=("Arial", 14, "bold"))
+feed_title_label.grid(row=1, column=0, pady=5, sticky="w")
+
+feed_list = tk.Listbox(middle_frame, height=20)  # Set a larger initial height
+feed_list.grid(row=2, column=0, sticky="nsew")
+feed_list.bind("<Double-1>", open_selected_entry)
+
+# Load saved feeds and populate the feed selector
+feeds = load_feeds()
+feed_selector['values'] = list(feeds.keys())
+feed_links = {}
+
+# Bind debounced resize event
+app.bind("<Configure>", debounce_resize)
+
+# Set minimum window size
+app.minsize(600, 400)
+
+# Run the application
+app.mainloop()
