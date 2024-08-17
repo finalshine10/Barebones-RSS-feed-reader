@@ -3,6 +3,8 @@ from tkinter import ttk, messagebox
 import feedparser
 import json
 import webbrowser
+from datetime import datetime
+import pytz
 
 # Function to load saved RSS feeds from a file
 def load_feeds():
@@ -33,33 +35,86 @@ def fetch_feed():
     feeds[feed_name] = url
     save_feeds(feeds)
 
-    feed_selector['values'] = list(feeds.keys())  # Update dropdown menu
+    feed_selector['values'] = ["Show All Feeds"] + list(feeds.keys())  # Update dropdown menu
     feed_selector.set(feed_name)
     display_feed(feed_name, feed.entries)
 
-# Function to display feed entries in the UI
+# Function to display individual feed entries in the UI
 def display_feed(feed_name, entries):
-    feed_list.delete(0, tk.END)
+    feed_text.config(state=tk.NORMAL)  # Enable editing to insert content
+    feed_text.delete(1.0, tk.END)
     feed_title.set(feed_name)
+    eastern = pytz.timezone('America/Toronto')
     for entry in entries:
-        feed_list.insert(tk.END, entry.title)
-        feed_links[entry.title] = entry.link
+        if hasattr(entry, 'published_parsed'):
+            published = datetime(*entry.published_parsed[:6], tzinfo=pytz.utc).astimezone(eastern)
+        else:
+            published = datetime.now(eastern)
+        
+        entry_time = published.strftime('%Y-%m-%d %H:%M')
+        entry_title = entry.title
+        
+        # Insert time, date, and title with different styles (no feed name in individual feed view)
+        feed_text.insert(tk.END, f"{entry_time} - ", "italic")
+        feed_text.insert(tk.END, f"{entry_title}\n", "normal")
+
+        # Store the link in a dictionary
+        feed_links[f"{entry_time} - {entry_title}"] = entry.link
+    feed_text.config(state=tk.DISABLED)  # Set to read-only after inserting content
+
+# Function to display all feed entries from all saved feeds in chronological order
+def display_all_feeds():
+    feed_text.config(state=tk.NORMAL)  # Enable editing to insert content
+    feed_text.delete(1.0, tk.END)
+    feed_title.set("All Feeds")
+
+    # Collect all entries
+    all_entries = []
+    eastern = pytz.timezone('America/Toronto')
+    for feed_name, url in feeds.items():
+        feed = feedparser.parse(url)
+        for entry in feed.entries:
+            if hasattr(entry, 'published_parsed'):
+                published = datetime(*entry.published_parsed[:6], tzinfo=pytz.utc).astimezone(eastern)
+            else:
+                published = datetime.now(eastern)
+            all_entries.append((feed_name, entry.title, entry.link, published))
+    
+    # Sort all entries by published date
+    all_entries.sort(key=lambda x: x[3], reverse=True)
+
+    # Insert each entry into the Text widget with proper formatting (including feed name)
+    for feed_name, title, link, published in all_entries:
+        entry_time = published.strftime('%Y-%m-%d %H:%M')
+        
+        # Insert time, date, and title with different styles
+        feed_text.insert(tk.END, f"{entry_time} - ", "italic")
+        feed_text.insert(tk.END, f"{feed_name}: ", "bold")
+        feed_text.insert(tk.END, f"{title}\n", "normal")
+
+        # Store the link in a dictionary
+        feed_links[f"{entry_time} - {feed_name}: {title}"] = link
+    feed_text.config(state=tk.DISABLED)  # Set to read-only after inserting content
 
 # Function to handle feed selection from saved feeds
 def on_feed_select(event):
     selected_feed = feed_selector.get()
-    if selected_feed:
+    if selected_feed == "Show All Feeds":
+        display_all_feeds()
+    elif selected_feed:
         feed = feedparser.parse(feeds[selected_feed])
         display_feed(selected_feed, feed.entries)
 
 # Function to open the selected feed item in the default web browser
 def open_selected_entry(event):
-    selected_index = feed_list.curselection()
-    if selected_index:
-        selected_title = feed_list.get(selected_index)
-        selected_link = feed_links.get(selected_title)
-        if selected_link:
-            webbrowser.open(selected_link)
+    cursor_index = feed_text.index(tk.CURRENT)
+    line_start = f"{cursor_index.split('.')[0]}.0"
+    line_end = f"{cursor_index.split('.')[0]}.end"
+    selected_line = feed_text.get(line_start, line_end).strip()
+
+    selected_link = feed_links.get(selected_line)
+    if selected_link:
+        webbrowser.open(selected_link)
 
 # Debounced function to handle resizing
 def debounce_resize(event):
@@ -75,7 +130,10 @@ def resize_widgets():
     fetch_button.config(font=("Arial", font_size))
     feed_selector.config(font=("Arial", font_size))
     feed_title_label.config(font=("Arial", font_size + 2, "bold"))
-    feed_list.config(font=("Arial", font_size))
+
+    feed_text.tag_configure("bold", font=("Arial", font_size, "bold"))
+    feed_text.tag_configure("italic", font=("Arial", font_size, "italic"))
+    feed_text.tag_configure("normal", font=("Arial", font_size))
 
 # Main application window
 app = tk.Tk()
@@ -119,13 +177,25 @@ feed_title = tk.StringVar()
 feed_title_label = ttk.Label(middle_frame, textvariable=feed_title, font=("Arial", 14, "bold"))
 feed_title_label.grid(row=1, column=0, pady=5, sticky="w")
 
-feed_list = tk.Listbox(middle_frame, height=20)  # Set a larger initial height
-feed_list.grid(row=2, column=0, sticky="nsew")
-feed_list.bind("<Double-1>", open_selected_entry)
+# Frame to hold the Text widget and Scrollbar
+text_frame = ttk.Frame(middle_frame)
+text_frame.grid(row=2, column=0, sticky="nsew")
+
+# Scrollbar for the Text widget
+scrollbar = ttk.Scrollbar(text_frame)
+scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+# Feed Text widget with Scrollbar linked
+feed_text = tk.Text(text_frame, wrap="word", yscrollcommand=scrollbar.set, font=("Arial", 10))
+feed_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+scrollbar.config(command=feed_text.yview)
+
+feed_text.bind("<Double-1>", open_selected_entry)
+feed_text.config(state=tk.DISABLED)  # Set the Text widget to read-only
 
 # Load saved feeds and populate the feed selector
 feeds = load_feeds()
-feed_selector['values'] = list(feeds.keys())
+feed_selector['values'] = ["Show All Feeds"] + list(feeds.keys())
 feed_links = {}
 
 # Bind debounced resize event
